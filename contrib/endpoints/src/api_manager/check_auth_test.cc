@@ -341,13 +341,15 @@ class CheckAuthTest : public ::testing::Test {
 
     EXPECT_CALL(*raw_request_, GetRequestHTTPMethod())
         .WillOnce(Return(std::string("GET")));
-    EXPECT_CALL(*raw_request_, GetRequestPath())
+    EXPECT_CALL(*raw_request_, GetUnparsedRequestPath())
         .WillOnce(Return(std::string("/ListShelves")));
     EXPECT_CALL(*raw_request_, FindQuery(_, _))
         .WillOnce(Invoke([](const std::string &, std::string *apikey) {
           *apikey = "apikey";
           return true;
         }));
+    EXPECT_CALL(*raw_request_, FindHeader("X-HTTP-Method-Override", _))
+        .Times(1);
     EXPECT_CALL(*raw_request_, FindHeader("referer", _))
         .WillOnce(Invoke([](const std::string &, std::string *http_referer) {
           *http_referer = "";

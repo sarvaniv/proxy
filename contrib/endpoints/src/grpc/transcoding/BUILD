@@ -67,6 +67,7 @@ cc_library(
         "message_stream.h",
     ],
     deps = [
+        ":transcoder_input_stream",
         "//external:protobuf",
     ],
 )
@@ -125,6 +126,7 @@ cc_library(
         "message_reader.h",
     ],
     deps = [
+        ":transcoder_input_stream",
         "//external:protobuf",
     ],
 )
@@ -145,12 +147,19 @@ cc_library(
 )
 
 cc_library(
-    name = "transcoding",
+    name = "transcoder_input_stream",
     srcs = [
-        "transcoder_factory.cc",
+        "transcoder_input_stream.h",
     ],
+    visibility = ["//visibility:public"],
+    deps = [
+        "@protobuf_git//:protobuf",
+    ],
+)
+
+cc_library(
+    name = "transcoding",
     hdrs = [
-        "transcoder_factory.h",
         "transcoder.h",
     ],
     visibility = ["//visibility:public"],
@@ -160,6 +169,18 @@ cc_library(
         ":response_to_json_translator",
         ":type_helper",
         "//external:protobuf",
+    ],
+)
+
+cc_library(
+    name = "transcoding_endpoints",
+    srcs = [
+        "transcoder_factory.cc",
+        "transcoder_factory.h",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":transcoding",
         "//contrib/endpoints/include:headers_only",
         "//external:service_config",
     ],
@@ -223,6 +244,7 @@ cc_library(
     srcs = ["test_common.cc"],
     hdrs = ["test_common.h"],
     deps = [
+        ":transcoder_input_stream",
         "//external:googletest",
         "//external:protobuf",
         "//external:service_config",
@@ -361,7 +383,7 @@ cc_test(
     deps = [
         ":bookstore_test_proto",
         ":test_common",
-        ":transcoding",
+        ":transcoding_endpoints",
         "//external:googletest_main",
     ],
 )

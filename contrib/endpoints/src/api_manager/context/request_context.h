@@ -66,6 +66,9 @@ class RequestContext {
   // Fill CheckRequestInfo
   void FillCheckRequestInfo(service_control::CheckRequestInfo *info);
 
+  // FillAllocateQuotaRequestInfo
+  void FillAllocateQuotaRequestInfo(service_control::QuotaRequestInfo *info);
+
   // Fill ReportRequestInfo
   void FillReportRequestInfo(Response *response,
                              service_control::ReportRequestInfo *info);
@@ -111,6 +114,12 @@ class RequestContext {
   void set_last_report_time(std::chrono::steady_clock::time_point tp) {
     last_report_time_ = tp;
   }
+
+  // Get the HTTP method to be used for the request. This method understands the
+  // X-Http-Method-Override header and if present, returns the
+  // X-Http-Method-Override method. Otherwise, the actual HTTP method is
+  // returned.
+  std::string GetRequestHTTPMethodWithOverride();
 
  private:
   // Fill OperationInfo
@@ -177,6 +186,10 @@ class RequestContext {
 
   // The time point of last intermediate report
   std::chrono::steady_clock::time_point last_report_time_;
+
+  // The accumulated data sent till last intermediate report
+  int64_t last_request_bytes_;
+  int64_t last_response_bytes_;
 };
 
 }  // namespace context

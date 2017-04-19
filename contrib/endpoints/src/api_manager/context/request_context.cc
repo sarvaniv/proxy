@@ -31,6 +31,9 @@ namespace {
 // Cloud Trace Context Header
 const char kCloudTraceContextHeader[] = "X-Cloud-Trace-Context";
 
+// HTTP Method Override Header
+const char kHttpMethodOverrideHeader[] = "X-HTTP-Method-Override";
+
 // Log message prefix for a success method.
 const char kMessage[] = "Method: ";
 // Log message prefix for an ignored method.
@@ -81,12 +84,14 @@ RequestContext::RequestContext(std::shared_ptr<ServiceContext> service_context,
                                std::unique_ptr<Request> request)
     : service_context_(service_context),
       request_(std::move(request)),
-      is_first_report_(true) {
+      is_first_report_(true),
+      last_request_bytes_(0),
+      last_response_bytes_(0) {
   start_time_ = std::chrono::system_clock::now();
   last_report_time_ = std::chrono::steady_clock::now();
   operation_id_ = GenerateUUID();
-  const std::string &method = request_->GetRequestHTTPMethod();
-  const std::string &path = request_->GetRequestPath();
+  const std::string &method = GetRequestHTTPMethodWithOverride();
+  const std::string &path = request_->GetUnparsedRequestPath();
   std::string query_params = request_->GetQueryParameters();
 
   // In addition to matching the method, service_context_->GetMethodCallInfo()
@@ -98,6 +103,7 @@ RequestContext::RequestContext(std::shared_ptr<ServiceContext> service_context,
   // 2) Store all the pieces needed for extracting variable bindings (such as
   //    http template variables, url path parts) in MethodCallInfo and extract
   //    variables lazily when needed.
+
   method_call_ =
       service_context_->GetMethodCallInfo(method, path, query_params);
 
@@ -122,6 +128,19 @@ RequestContext::RequestContext(std::shared_ptr<ServiceContext> service_context,
         trace_context_header, method_name,
         &service_context_->cloud_trace_aggregator()->sampler()));
   }
+}
+
+std::string RequestContext::GetRequestHTTPMethodWithOverride() {
+  std::string method;
+
+  if (!request_->FindHeader(kHttpMethodOverrideHeader, &method)) {
+    method = request()->GetRequestHTTPMethod();
+  }
+
+  service_context()->env()->LogDebug(std::string("Request method SET TO: ") +
+                                     method);
+
+  return method;
 }
 
 void RequestContext::ExtractApiKey() {
@@ -241,6 +260,16 @@ void RequestContext::FillCheckRequestInfo(
   request_->FindHeader(kXIosBundleId, &info->ios_bundle_id);
 }
 
+void RequestContext::FillAllocateQuotaRequestInfo(
+    service_control::QuotaRequestInfo *info) {
+  FillOperationInfo(info);
+
+  info->client_ip = request_->GetClientIP();
+  info->method_name = this->method_call_.method_info->name();
+  info->metric_cost_vector =
+      &this->method_call_.method_info->metric_cost_vector();
+}
+
 void RequestContext::FillReportRequestInfo(
     Response *response, service_control::ReportRequestInfo *info) {
   FillOperationInfo(info);
@@ -248,7 +277,7 @@ void RequestContext::FillReportRequestInfo(
   FillComputePlatform(info);
 
   info->url = request_->GetUnparsedRequestPath();
-  info->method = request_->GetRequestHTTPMethod();
+  info->method = GetRequestHTTPMethodWithOverride();
 
   info->protocol = request_->GetRequestProtocol();
   info->check_response_info = check_response_info_;
@@ -257,13 +286,23 @@ void RequestContext::FillReportRequestInfo(
   info->auth_audience = auth_audience_;
 
   if (!info->is_final_report) {
-    info->request_bytes = request_->GetGrpcRequestBytes();
-    info->response_bytes = request_->GetGrpcResponseBytes();
+    // Make sure we send delta metrics for intermediate reports.
+    info->request_bytes = request_->GetGrpcRequestBytes() - last_request_bytes_;
+    info->response_bytes =
+        request_->GetGrpcResponseBytes() - last_response_bytes_;
+    last_request_bytes_ += info->request_bytes;
+    last_response_bytes_ += info->response_bytes;
   } else {
     info->request_size = response->GetRequestSize();
     info->response_size = response->GetResponseSize();
-    info->request_bytes = info->request_size;
-    info->response_bytes = info->response_size;
+    info->request_bytes = info->request_size - last_request_bytes_;
+    if (info->request_bytes < 0) {
+      info->request_bytes = 0;
+    }
+    info->response_bytes = info->response_size - last_response_bytes_;
+    if (info->response_bytes < 0) {
+      info->response_bytes = 0;
+    }
 
     info->streaming_request_message_counts =
         request_->GetGrpcRequestMessageCounts();
