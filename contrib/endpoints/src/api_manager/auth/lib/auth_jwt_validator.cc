@@ -97,7 +97,7 @@ class JwtValidatorImpl : public JwtValidator {
   grpc_jwt_verifier_status Validate(const char *jwt, size_t jwt_len,
                                     const char *pkey, size_t pkey_len,
                                     const char *aud);
-  grpc_jwt_verifier_status ParseImpl();
+  grpc_jwt_verifier_status ParseImpl(std::string *error_message);
   grpc_jwt_verifier_status VerifySignatureImpl(const char *pkey,
                                                size_t pkey_len);
   // Parses the audiences and removes the audiences from the json object.
@@ -239,7 +239,8 @@ JwtValidatorImpl::~JwtValidatorImpl() {
 }
 
 Status JwtValidatorImpl::Parse(UserInfo *user_info) {
-  grpc_jwt_verifier_status status = ParseImpl();
+  std::string error_message;
+  grpc_jwt_verifier_status status = ParseImpl(&error_message);
   if (status == GRPC_JWT_VERIFIER_OK) {
     status = FillUserInfoAndSetExp(user_info);
     if (status == GRPC_JWT_VERIFIER_OK) {
@@ -291,11 +292,12 @@ void JwtValidatorImpl::UpdateAudience(grpc_json *json) {
   }
 }
 
-grpc_jwt_verifier_status JwtValidatorImpl::ParseImpl() {
+grpc_jwt_verifier_status JwtValidatorImpl::ParseImpl(std::string *error_message) {
   // ====================
   // Basic check.
   // ====================
   if (jwt == nullptr || jwt_len <= 0) {
+    *error_message  = "JWT is null or jwt_len <= 0";
     return GRPC_JWT_VERIFIER_BAD_FORMAT;
   }
 
@@ -305,12 +307,14 @@ grpc_jwt_verifier_status JwtValidatorImpl::ParseImpl() {
   const char *cur = jwt;
   const char *dot = strchr(cur, '.');
   if (dot == nullptr) {
+    *error_message = "Cannot find any \'.\'";
     return GRPC_JWT_VERIFIER_BAD_FORMAT;
   }
   header_json_ =
       DecodeBase64AndParseJson(&exec_ctx_, cur, dot - cur, &header_buffer_);
   CreateJoseHeader();
   if (header_ == nullptr) {
+    *error_message = "Cannot fine Jose Header";
     return GRPC_JWT_VERIFIER_BAD_FORMAT;
   }
 
@@ -320,6 +324,7 @@ grpc_jwt_verifier_status JwtValidatorImpl::ParseImpl() {
   cur = dot + 1;
   dot = strchr(cur, '.');
   if (dot == nullptr) {
+    *error_message = "Cannot find second dot";
     return GRPC_JWT_VERIFIER_BAD_FORMAT;
   }
 
@@ -332,6 +337,7 @@ grpc_jwt_verifier_status JwtValidatorImpl::ParseImpl() {
     if (!GPR_SLICE_IS_EMPTY(claims_buffer)) {
       gpr_slice_unref(claims_buffer);
     }
+    *error_message = "Empty Json Claim";
     return GRPC_JWT_VERIFIER_BAD_FORMAT;
   }
   UpdateAudience(claims_json);
@@ -340,6 +346,7 @@ grpc_jwt_verifier_status JwtValidatorImpl::ParseImpl() {
 
   // issuer is mandatory. grpc_jwt_claims_issuer checks if claims_ is nullptr.
   if (grpc_jwt_claims_issuer(claims_) == nullptr) {
+    *error_message = "No issuer found in claims";
     return GRPC_JWT_VERIFIER_BAD_FORMAT;
   }
 
@@ -349,6 +356,7 @@ grpc_jwt_verifier_status JwtValidatorImpl::ParseImpl() {
   grpc_jwt_verifier_status status =
       grpc_jwt_claims_check(claims_, grpc_jwt_claims_audience(claims_));
   if (status != GRPC_JWT_VERIFIER_OK) {
+    *error_message = "FORMAT ERROR 1";
     return status;
   }
 
@@ -358,12 +366,14 @@ grpc_jwt_verifier_status JwtValidatorImpl::ParseImpl() {
   size_t signed_jwt_len = (size_t)(dot - jwt);
   signed_buffer_ = gpr_slice_from_copied_buffer(jwt, signed_jwt_len);
   if (GPR_SLICE_IS_EMPTY(signed_buffer_)) {
+    *error_message = "FORMAT ERROR 2";
     return GRPC_JWT_VERIFIER_BAD_FORMAT;
   }
   cur = dot + 1;
   sig_buffer_ = grpc_base64_decode_with_len(&exec_ctx_, cur,
                                             jwt_len - signed_jwt_len - 1, 1);
   if (GPR_SLICE_IS_EMPTY(sig_buffer_)) {
+    *error_message = "FORMAT ERROR 3";
     return GRPC_JWT_VERIFIER_BAD_FORMAT;
   }
 
