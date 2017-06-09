@@ -67,6 +67,7 @@ extern "C" {
 #include <string>
 
 #include "contrib/endpoints/src/api_manager/auth/lib/json_util.h"
+#include "contrib/endpoints/src/api_manager/auth/lib/grpc_jwt_verifier.h"
 
 using std::string;
 using std::chrono::system_clock;
